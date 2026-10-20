@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Lockpick Pro</title>
+<style>
+  :root { --bg:#14100c; --panel:#241c14; --brass:#c9a24b; --brass-d:#8a6c2a; --text:#e8dcc3; --dim:#9c8f78; --bad:#d9533f; --good:#7bc96f; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font:15px/1.4 "Segoe UI", system-ui, sans-serif; user-select:none; -webkit-user-select:none; touch-action:none; }
+  #app { max-width:720px; margin:0 auto; padding:10px 16px 16px; display:flex; flex-direction:column; min-height:100%; }
+  #hud { display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; padding:8px 12px; background:var(--panel);
+    border:1px solid var(--brass-d); border-radius:8px; }
+  #hud span b { color:var(--brass); font-weight:600; }
+  #hud .grow { flex:1; }
+  button { font:inherit; color:var(--text); background:#3a2d1d; border:1px solid var(--brass-d); border-radius:6px;
+    padding:6px 14px; cursor:pointer; }
+  button:hover:not(:disabled) { background:#4d3b25; border-color:var(--brass); }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:var(--brass-d); color:#fff; }
+  #stage { position:relative; flex:1; display:flex; align-items:center; justify-content:center; min-height:0; }
+  canvas { width:100%; max-width:600px; aspect-ratio:1; height:auto; display:block; touch-action:none; }
+  #turn { display:none; position:absolute; bottom:6px; right:6px; padding:14px 22px; font-size:17px; }
+  @media (pointer:coarse) { #turn { display:block; } }
+  #help { text-align:center; color:var(--dim); font-size:13px; margin-top:4px; }
+  #shop { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none; align-items:center; justify-content:center; padding:16px; z-index:5; }
+  #shop.open { display:flex; }
+  #shopbox { background:var(--panel); border:2px solid var(--brass-d); border-radius:10px; padding:18px 20px; width:100%; max-width:420px; }
+  #shopbox h2 { margin:0 0 4px; color:var(--brass); }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-top:1px solid #3a2d1d; }
+  .row small { color:var(--dim); display:block; }
+  .btns { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <span>Gold <b id="hGold">0</b></span>
+    <span>Picks <b id="hPicks">5</b></span>
+    <span>Security <b id="hSec">20</b></span>
+    <span id="hPrestWrap">Prestige <b id="hPrest">0</b></span>
+    <span class="grow"></span>
+    <button id="shopBtn">Shop</button>
+  </div>
+  <div id="stage">
+    <canvas id="cv" width="1200" height="1200"></canvas>
+    <button id="turn" class="primary">Turn</button>
+  </div>
+  <div id="help">Move the mouse to angle the lockpick &middot; hold <b>A</b> or <b>D</b> to turn the lock (both together = 2x speed) &middot; <b>&larr; &rarr;</b> also move the pick &middot; <b>Esc</b> closes the shop</div>
+</div>
+
+<div id="shop">
+  <div id="shopbox">
+    <h2>Shop</h2>
+    <div>Gold: <b id="sGold"></b></div>
+    <div class="row"><div>Lockpick<small id="sPickInfo"></small></div><div class="btns"><button id="buyPick"></button><button id="buyPick5"></button></div></div>
+    <div class="row"><div>Security skill<small id="sSecInfo"></small></div><div class="btns"><button id="buySec"></button><button id="buySec10"></button></div></div>
+    <div class="row"><div>Prestige<small id="sPrestInfo"></small></div><div class="btns"><button id="prestige"></button></div></div>
+    <div style="text-align:right;margin-top:10px"><button id="closeShop" class="primary">Close</button></div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+// ---------- tunables ----------
+const START_PICKS = 5, START_SEC = 20, MAX_SEC = 100;
+const PICK_COST = 30, PICK_HP = 100, JAM_DMG = 55;       // HP lost per second while jammed
+const TURN_SPEED = 100, RETURN_SPEED = 240;              // degrees per second
+const PRESTIGE_BONUS = 0.25;                              // +25% gold per prestige
+const secCost = s => Math.round(20 * Math.pow(1.045, s - START_SEC));  // cost to go from s to s+1
+const reward = lvl => Math.round((5 + lvl * 1.5) * (1 + PRESTIGE_BONUS * S.prestige));
+
+// ---------- state ----------
+const S = { gold:0, picks:START_PICKS, sec:START_SEC, prestige:0 };
+const SAVE_KEY = 'lockpickPro.v1';
+try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY)) || {}); } catch (e) {}
+const save = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} };
+
+let lock;            // {level, sweet, width}
+let phi = 90;        // pick angle, degrees (0 = left, 180 = right)
+let theta = 0;       // lock rotation, degrees clockwise
+let hp = PICK_HP;
+let mode = 'play';   // play | opening | broken
+let modeT = 0, jammed = false, shopOpen = false, msg = '', msgT = 0;
+const floaters = [];
+const keys = { a:false, d:false, touch:false, left:false, right:false };
+const turnPower = () => (keys.a ? 1 : 0) + (keys.d ? 1 : 0) + (keys.touch ? 1 : 0);  // A+D together = 2x speed
+
+function sweetWidth(level) {                  // full width of sweet spot in degrees
+  const diff = level - S.sec;
+  return diff <= 0 ? Math.min(60, 24 - diff * 0.35) : Math.max(3, 24 - diff * (21 / 80));
+}
+function newLock() {
+  const level = 1 + Math.floor(Math.random() * 100);
+  lock = { level, sweet: 8 + Math.random() * 164, width: sweetWidth(level) };
+  theta = 0; jammed = false; mode = 'play';
+}
+function maxTurn() {
+  const d = Math.abs(phi - lock.sweet) - lock.width / 2;
+  if (d <= 0) return 90;
+  return Math.max(5, 75 * (1 - d / 50));
+}
+function say(t) { msg = t; msgT = 2.5; }
+function difficulty() {
+  const d = lock.level - S.sec;
+  return d <= -20 ? 'Trivial' : d <= 0 ? 'Easy' : d <= 20 ? 'Moderate' : d <= 45 ? 'Hard' : d <= 65 ? 'Very Hard' : 'Brutal';
+}
+
+function ensurePick() {
+  if (S.picks <= 0 && S.gold < PICK_COST) { S.picks = 1; say('A stranger lends you a lockpick.'); }
+}
+function breakPick() {
+  S.picks--; mode = 'broken'; modeT = 0.8; jammed = false; say('Lockpick broke!'); save();
+}
+
+// ---------- update ----------
+function update(dt) {
+  if (msgT > 0) msgT -= dt;
+  for (const f of floaters) { f.t += dt; }
+  while (floaters.length && floaters[0].t > 1.4) floaters.shift();
+  if (shopOpen) return;
+
+  if (mode === 'broken') {
+    modeT -= dt;
+    if (modeT <= 0) { ensurePick(); hp = PICK_HP; theta = 0; if (S.picks > 0) mode = 'play'; }
+    else theta = Math.max(0, theta - RETURN_SPEED * dt);
+    return;
+  }
+  if (mode === 'opening') {
+    modeT -= dt;
+    theta = Math.min(90, theta + 200 * dt);
+    if (modeT <= 0) newLock();
+    return;
+  }
+  if (S.picks <= 0) { ensurePick(); if (S.picks <= 0) return; hp = PICK_HP; }
+
+  if (theta < 1) {                            // pick can only be moved while the lock is at rest
+    const k = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+    if (k) phi = Math.max(0, Math.min(180, phi + k * 90 * dt));
+  }
+  const power = Math.min(2, turnPower());
+  if (power) {
+    const lim = maxTurn();
+    theta += TURN_SPEED * power * dt;
+    if (theta >= 90 && lim >= 90) {           // success
+      theta = 90; mode = 'opening'; modeT = 0.8;
+      const g = reward(lock.level); S.gold += g;
+      floaters.push({ t:0, text:'+' + g + ' gold' }); save();
+    } else if (theta >= lim) {
+      theta = lim; jammed = true;
+      hp -= JAM_DMG * dt;
+      if (hp <= 0) breakPick();
+    } else jammed = false;
+  } else {
+    jammed = false;
+    theta = Math.max(0, theta - RETURN_SPEED * dt);
+  }
+}
+
+// ---------- drawing ----------
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = 600, CX = 300, CY = 330, R = 190, KH = 26;   // logical size, lock centre/radius, keyhole top offset
+const rad = d => d * Math.PI / 180;
+
+function draw() {
+  ctx.setTransform(cv.width / W, 0, 0, cv.height / W, 0, 0);
+  ctx.clearRect(0, 0, W, W);
+
+  let sx = 0, sy = 0;
+  if (jammed) { sx = (Math.random() - .5) * 6; sy = (Math.random() - .5) * 6; }
+
+  // lock plate (static)
+  const plate = ctx.createRadialGradient(CX - 50, CY - 60, 20, CX, CY, R + 30);
+  plate.addColorStop(0, '#6b5a3c'); plate.addColorStop(1, '#2a2013');
+  ctx.fillStyle = plate; ctx.strokeStyle = '#8a6c2a'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(CX, CY, R + 24, 0, 7); ctx.fill(); ctx.stroke();
+  for (const a of [45, 135, 225, 315]) {            // screws
+    const x = CX + Math.cos(rad(a)) * (R + 4), y = CY + Math.sin(rad(a)) * (R + 4);
+    ctx.fillStyle = '#4a3b22'; ctx.beginPath(); ctx.arc(x, y, 9, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#1a1209'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(x - 6, y - 2); ctx.lineTo(x + 6, y + 2); ctx.stroke();
+  }
+
+  // rotating cylinder + keyhole + pick
+  ctx.save();
+  ctx.translate(CX + sx, CY + sy); ctx.rotate(rad(theta));
+  const cyl = ctx.createRadialGradient(-40, -50, 10, 0, 0, R - 20);
+  cyl.addColorStop(0, '#e2c277'); cyl.addColorStop(.6, '#b08d3c'); cyl.addColorStop(1, '#6e5521');
+  ctx.fillStyle = cyl; ctx.strokeStyle = '#3d2e12'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(0, 0, R - 20, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1;
+  for (let r = 40; r < R - 20; r += 22) { ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke(); }
+  // keyhole
+  ctx.fillStyle = '#0c0805';
+  ctx.beginPath(); ctx.arc(0, -KH + 4, 14, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-9, -KH + 8); ctx.lineTo(9, -KH + 8); ctx.lineTo(14, 52); ctx.lineTo(-14, 52); ctx.closePath(); ctx.fill();
+
+  ctx.restore();
+
+  // lockpick: its base follows the keyhole top as the lock turns, but its angle stays fixed on screen
+  if (S.picks > 0 || mode === 'broken') {
+    const broken = mode === 'broken';
+    const dmg = 1 - Math.max(0, hp) / PICK_HP;
+    ctx.save();
+    ctx.translate(CX + sx + KH * Math.sin(rad(theta)), CY + sy - KH * Math.cos(rad(theta)));
+    ctx.rotate(rad(phi - 90));
+    const len = 255;
+    ctx.lineCap = 'round';
+    if (broken) { ctx.translate((Math.random() - .5) * 6, 0); }
+    ctx.strokeStyle = `rgb(${190 + dmg * 50 | 0},${190 - dmg * 110 | 0},${200 - dmg * 140 | 0})`;
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -(broken ? len * .55 : len)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-1.5, -4); ctx.lineTo(-1.5, -(broken ? len * .55 : len) + 4); ctx.stroke();
+    ctx.restore();
+  }
+
+  // pick HP bar
+  const bw = 260, bx = (W - bw) / 2, by = 556;
+  ctx.fillStyle = '#1b140c'; ctx.fillRect(bx, by, bw, 14);
+  const f = Math.max(0, hp) / PICK_HP;
+  ctx.fillStyle = f > .5 ? '#7bc96f' : f > .25 ? '#d6b13f' : '#d9533f';
+  ctx.fillRect(bx, by, bw * f, 14);
+  ctx.strokeStyle = '#8a6c2a'; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, 14);
+  ctx.fillStyle = '#9c8f78'; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Lockpick condition', W / 2, by - 6);
+
+  // lock info
+  ctx.fillStyle = '#e8dcc3'; ctx.font = '600 20px system-ui, sans-serif';
+  ctx.fillText('Lock Level ' + lock.level + '  –  ' + difficulty(), W / 2, 34);
+  ctx.font = '14px system-ui, sans-serif'; ctx.fillStyle = '#9c8f78';
+  ctx.fillText('Reward: ' + reward(lock.level) + ' gold', W / 2, 56);
+
+  // messages
+  let line = msgT > 0 ? msg : (S.picks <= 0 ? 'Out of lockpicks – visit the shop' : '');
+  if (line) {
+    ctx.font = '600 22px system-ui, sans-serif'; ctx.fillStyle = '#d9533f';
+    ctx.fillText(line, W / 2, 96);
+  }
+  for (const fl of floaters) {
+    ctx.globalAlpha = Math.max(0, 1 - fl.t / 1.4);
+    ctx.fillStyle = '#7bc96f'; ctx.font = '700 30px system-ui, sans-serif';
+    ctx.fillText(fl.text, CX, CY - 40 - fl.t * 60);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---------- HUD / shop ----------
+const $ = id => document.getElementById(id);
+let prestigeArm = false;
+function refreshUI() {
+  $('hGold').textContent = S.gold; $('hPicks').textContent = S.picks;
+  $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige;
+  $('sGold').textContent = S.gold;
+  $('sPickInfo').textContent = 'Owned: ' + S.picks + ' – each has ' + PICK_HP + ' HP';
+  $('buyPick').textContent = '1 for ' + PICK_COST; $('buyPick').disabled = S.gold < PICK_COST;
+  $('buyPick5').textContent = '5 for ' + PICK_COST * 5; $('buyPick5').disabled = S.gold < PICK_COST * 5;
+  const maxed = S.sec >= MAX_SEC;
+  $('sSecInfo').textContent = 'Level ' + S.sec + ' / ' + MAX_SEC + ' – bigger sweet spots';
+  let c1 = maxed ? 0 : secCost(S.sec), c10 = 0;
+  for (let s = S.sec, i = 0; s < MAX_SEC && i < 10; s++, i++) c10 += secCost(s);
+  $('buySec').textContent = maxed ? 'Maxed' : '+1 for ' + c1; $('buySec').disabled = maxed || S.gold < c1;
+  $('buySec10').textContent = maxed ? '' : '+10 for ' + c10; $('buySec10').style.display = maxed ? 'none' : '';
+  $('buySec10').disabled = maxed || S.gold < c10;
+  $('sPrestInfo').textContent = 'Prestige ' + S.prestige + ' (+' + Math.round(PRESTIGE_BONUS * 100 * S.prestige) +
+    '% gold). At Security 100: reset Security to ' + START_SEC + ' and gold to 0, gain +' + Math.round(PRESTIGE_BONUS * 100) + '% gold.';
+  $('prestige').disabled = S.sec < MAX_SEC;
+  $('prestige').textContent = prestigeArm ? 'Confirm?' : 'Prestige';
+}
+function buySec(n) {
+  while (n-- > 0 && S.sec < MAX_SEC && S.gold >= secCost(S.sec)) { S.gold -= secCost(S.sec); S.sec++; }
+  lock.width = sweetWidth(lock.level);       // current lock benefits immediately
+  save(); refreshUI();
+}
+function openShop(o) {
+  shopOpen = o; prestigeArm = false;
+  $('shop').classList.toggle('open', o);
+  keys.a = keys.d = keys.touch = false; refreshUI();
+  if (!o && S.picks <= 0) ensurePick();
+}
+$('shopBtn').onclick = () => openShop(true);
+$('closeShop').onclick = () => openShop(false);
+$('buyPick').onclick = () => { if (S.gold >= PICK_COST) { S.gold -= PICK_COST; S.picks++; save(); refreshUI(); } };
+$('buyPick5').onclick = () => { if (S.gold >= PICK_COST * 5) { S.gold -= PICK_COST * 5; S.picks += 5; save(); refreshUI(); } };
+$('buySec').onclick = () => buySec(1);
+$('buySec10').onclick = () => buySec(10);
+$('prestige').onclick = () => {
+  if (S.sec < MAX_SEC) return;
+  if (!prestigeArm) { prestigeArm = true; refreshUI(); return; }
+  S.prestige++; S.sec = START_SEC; S.gold = 0; prestigeArm = false;
+  lock.width = sweetWidth(lock.level); save(); refreshUI(); openShop(false);
+  say('Prestige ' + S.prestige + '! Security reset.');
+};
+
+// ---------- input ----------
+function setPhiFromPointer(e) {
+  if (theta >= 1 || shopOpen) return;
+  const r = cv.getBoundingClientRect();
+  const t = (e.clientX - r.left) / r.width;
+  phi = Math.max(0, Math.min(180, (t - 0.12) / 0.76 * 180));
+}
+window.addEventListener('pointermove', setPhiFromPointer);
+cv.addEventListener('pointerdown', setPhiFromPointer);
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'escape' && shopOpen) { openShop(false); return; }
+  if (shopOpen) return;
+  if (k === 'a' || k === 'd') { keys[k] = true; e.preventDefault(); }
+  else if (k === 'arrowleft') { keys.left = true; e.preventDefault(); }
+  else if (k === 'arrowright') { keys.right = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'a' || k === 'd') keys[k] = false;
+  else if (k === 'arrowleft') keys.left = false;
+  else if (k === 'arrowright') keys.right = false;
+});
+window.addEventListener('blur', () => { keys.a = keys.d = keys.touch = keys.left = keys.right = false; });
+const tb = $('turn');
+tb.addEventListener('pointerdown', e => { keys.touch = true; tb.setPointerCapture(e.pointerId); e.stopPropagation(); });
+['pointerup', 'pointercancel'].forEach(n => tb.addEventListener(n, () => { keys.touch = false; }));
+
+// ---------- loop ----------
+function fit() {
+  const s = Math.min(1200, Math.round(cv.clientWidth * (window.devicePixelRatio || 1)));
+  if (s > 0 && cv.width !== s) { cv.width = cv.height = s; }
+}
+window.addEventListener('resize', fit);
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); draw();
+  if (!shopOpen) { $('hGold').textContent = S.gold; $('hPicks').textContent = S.picks; $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige; }
+  requestAnimationFrame(frame);
+}
+newLock(); ensurePick(); fit(); refreshUI();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
