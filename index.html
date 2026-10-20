@@ -5,31 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>Lockpick Pro</title>
 <style>
-  :root { --bg:#14100c; --panel:#241c14; --brass:#c9a24b; --brass-d:#8a6c2a; --text:#e8dcc3; --dim:#9c8f78; --bad:#d9533f; --good:#7bc96f; }
-  * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
-    font:15px/1.4 "Segoe UI", system-ui, sans-serif; user-select:none; -webkit-user-select:none; touch-action:none; }
+  :root { --fg:#fff; --dim:#8a8a8a; --line:#4a4a4a; }
+  * { box-sizing: border-box; border-radius:0; }
+  html, body { margin:0; height:100%; background:#000; color:var(--fg);
+    font:14px/1.5 ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace; user-select:none; -webkit-user-select:none; touch-action:none; }
   #app { max-width:720px; margin:0 auto; padding:10px 16px 16px; display:flex; flex-direction:column; min-height:100%; }
-  #hud { display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; padding:8px 12px; background:var(--panel);
-    border:1px solid var(--brass-d); border-radius:8px; }
-  #hud span b { color:var(--brass); font-weight:600; }
+  #hud { display:flex; flex-wrap:wrap; gap:2px 20px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);
+    text-transform:uppercase; color:var(--dim); }
+  #hud span b { color:var(--fg); font-weight:400; margin-left:6px; }
   #hud .grow { flex:1; }
-  button { font:inherit; color:var(--text); background:#3a2d1d; border:1px solid var(--brass-d); border-radius:6px;
-    padding:6px 14px; cursor:pointer; }
-  button:hover:not(:disabled) { background:#4d3b25; border-color:var(--brass); }
-  button:disabled { opacity:.4; cursor:default; }
-  button.primary { background:var(--brass-d); color:#fff; }
+  button { font:inherit; text-transform:uppercase; color:var(--fg); background:#000; border:0; padding:0 4px; cursor:pointer; }
+  button::before { content:"[ "; color:var(--dim); }
+  button::after { content:" ]"; color:var(--dim); }
+  button:hover:not(:disabled) { background:var(--fg); color:#000; }
+  button:hover:not(:disabled)::before, button:hover:not(:disabled)::after { color:#000; }
+  button:disabled { color:var(--line); cursor:default; }
+  button:disabled::before, button:disabled::after { color:var(--line); }
   #stage { position:relative; flex:1; display:flex; align-items:center; justify-content:center; min-height:0; }
   canvas { width:100%; max-width:600px; aspect-ratio:1; height:auto; display:block; touch-action:none; }
-  #turn { display:none; position:absolute; bottom:6px; right:6px; padding:14px 22px; font-size:17px; }
+  #turn { display:none; position:absolute; bottom:6px; right:6px; padding:12px 8px; }
   @media (pointer:coarse) { #turn { display:block; } }
-  #help { text-align:center; color:var(--dim); font-size:13px; margin-top:4px; }
-  #shop { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none; align-items:center; justify-content:center; padding:16px; z-index:5; }
+  #help { color:var(--dim); font-size:12px; margin-top:4px; border-top:1px solid var(--line); padding-top:6px; }
+  #help b { color:var(--fg); font-weight:400; }
+  #shop { position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; padding:16px; z-index:5; }
   #shop.open { display:flex; }
-  #shopbox { background:var(--panel); border:2px solid var(--brass-d); border-radius:10px; padding:18px 20px; width:100%; max-width:420px; }
-  #shopbox h2 { margin:0 0 4px; color:var(--brass); }
-  .row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-top:1px solid #3a2d1d; }
-  .row small { color:var(--dim); display:block; }
+  #shopbox { border:1px solid var(--fg); padding:16px 18px; width:100%; max-width:480px; }
+  #shopbox h2 { margin:0 0 6px; font-size:14px; font-weight:400; text-transform:uppercase; }
+  #shopbox h2::before { content:"> "; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--line); }
+  .row small { color:var(--dim); display:block; font-size:12px; }
   .btns { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
 </style>
 </head>
@@ -39,13 +43,14 @@
     <span>Gold <b id="hGold">0</b></span>
     <span>Picks <b id="hPicks">5</b></span>
     <span>Security <b id="hSec">20</b></span>
+    <span style="display:none">Max lock <b id="hCap">25</b></span>
     <span id="hPrestWrap">Prestige <b id="hPrest">0</b></span>
     <span class="grow"></span>
     <button id="shopBtn">Shop</button>
   </div>
   <div id="stage">
     <canvas id="cv" width="1200" height="1200"></canvas>
-    <button id="turn" class="primary">Turn</button>
+    <button id="turn">Turn</button>
   </div>
   <div id="help">Move the mouse to angle the lockpick &middot; hold <b>A</b> or <b>D</b> to turn the lock (both together = 2x speed) &middot; <b>&larr; &rarr;</b> also move the pick &middot; <b>Esc</b> closes the shop</div>
 </div>
@@ -57,7 +62,7 @@
     <div class="row"><div>Lockpick<small id="sPickInfo"></small></div><div class="btns"><button id="buyPick"></button><button id="buyPick5"></button></div></div>
     <div class="row"><div>Security skill<small id="sSecInfo"></small></div><div class="btns"><button id="buySec"></button><button id="buySec10"></button></div></div>
     <div class="row"><div>Prestige<small id="sPrestInfo"></small></div><div class="btns"><button id="prestige"></button></div></div>
-    <div style="text-align:right;margin-top:10px"><button id="closeShop" class="primary">Close</button></div>
+    <div style="text-align:right;margin-top:10px"><button id="closeShop">Close</button></div>
   </div>
 </div>
 
@@ -68,12 +73,13 @@
 const START_PICKS = 5, START_SEC = 20, MAX_SEC = 100;
 const PICK_COST = 30, PICK_HP = 100, JAM_DMG = 55;       // HP lost per second while jammed
 const TURN_SPEED = 100, RETURN_SPEED = 240;              // degrees per second
+const LEVEL_CAP_START = 25;
 const PRESTIGE_BONUS = 0.25;                              // +25% gold per prestige
 const secCost = s => Math.round(20 * Math.pow(1.045, s - START_SEC));  // cost to go from s to s+1
 const reward = lvl => Math.round((5 + lvl * 1.5) * (1 + PRESTIGE_BONUS * S.prestige));
 
 // ---------- state ----------
-const S = { gold:0, picks:START_PICKS, sec:START_SEC, prestige:0 };
+const S = { gold:0, picks:START_PICKS, sec:START_SEC, prestige:0, opened:0 };
 const SAVE_KEY = 'lockpickPro.v1';
 try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY)) || {}); } catch (e) {}
 const save = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} };
@@ -92,8 +98,10 @@ function sweetWidth(level) {                  // full width of sweet spot in deg
   const diff = level - S.sec;
   return diff <= 0 ? Math.min(60, 24 - diff * 0.35) : Math.max(3, 24 - diff * (21 / 80));
 }
+// highest possible Lock Level: starts at 25, +3 per 2 locks opened, up to 100 (resets on prestige)
+const levelCap = () => Math.min(100, LEVEL_CAP_START + Math.floor(S.opened * 1.5));
 function newLock() {
-  const level = 1 + Math.floor(Math.random() * 100);
+  const level = 1 + Math.floor(Math.random() * levelCap());
   lock = { level, sweet: 8 + Math.random() * 164, width: sweetWidth(level) };
   theta = 0; jammed = false; mode = 'play';
 }
@@ -146,7 +154,7 @@ function update(dt) {
     theta += TURN_SPEED * power * dt;
     if (theta >= 90 && lim >= 90) {           // success
       theta = 90; mode = 'opening'; modeT = 0.8;
-      const g = reward(lock.level); S.gold += g;
+      const g = reward(lock.level); S.gold += g; S.opened++;
       floaters.push({ t:0, text:'+' + g + ' gold' }); save();
     } else if (theta >= lim) {
       theta = lim; jammed = true;
@@ -164,84 +172,105 @@ const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const W = 600, CX = 300, CY = 330, R = 190, KH = 26;   // logical size, lock centre/radius, keyhole top offset
 const rad = d => d * Math.PI / 180;
 
-function draw() {
-  ctx.setTransform(cv.width / W, 0, 0, cv.height / W, 0, 0);
-  ctx.clearRect(0, 0, W, W);
+const FONT = 'ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace';
+// Shapes are drawn on a coarse 300x300 buffer, alpha-thresholded (no anti-aliasing) and scaled up
+// without smoothing, so every edge is a hard, chunky stair-step. Text is drawn crisp on top.
+const GS = 300;
+const gfx = document.createElement('canvas'); gfx.width = gfx.height = GS;
+const g = gfx.getContext('2d', { willReadFrequently: true });
 
-  let sx = 0, sy = 0;
-  if (jammed) { sx = (Math.random() - .5) * 6; sy = (Math.random() - .5) * 6; }
+function drawShapes(sx, sy) {
+  g.setTransform(GS / W, 0, 0, GS / W, 0, 0);
+  g.clearRect(0, 0, W, W);
 
-  // lock plate (static)
-  const plate = ctx.createRadialGradient(CX - 50, CY - 60, 20, CX, CY, R + 30);
-  plate.addColorStop(0, '#6b5a3c'); plate.addColorStop(1, '#2a2013');
-  ctx.fillStyle = plate; ctx.strokeStyle = '#8a6c2a'; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.arc(CX, CY, R + 24, 0, 7); ctx.fill(); ctx.stroke();
-  for (const a of [45, 135, 225, 315]) {            // screws
-    const x = CX + Math.cos(rad(a)) * (R + 4), y = CY + Math.sin(rad(a)) * (R + 4);
-    ctx.fillStyle = '#4a3b22'; ctx.beginPath(); ctx.arc(x, y, 9, 0, 7); ctx.fill();
-    ctx.strokeStyle = '#1a1209'; ctx.lineWidth = 2; ctx.beginPath();
-    ctx.moveTo(x - 6, y - 2); ctx.lineTo(x + 6, y + 2); ctx.stroke();
+  // range scale across the top half
+  g.strokeStyle = '#fff'; g.lineWidth = 4;
+  for (let a = 0; a <= 180; a += 10) {
+    const big = a % 90 === 0, r0 = R + 6, r1 = R + (big ? 30 : 16);
+    const dx = -Math.cos(rad(a)), dy = -Math.sin(rad(a));
+    g.beginPath(); g.moveTo(CX + dx * r0, CY + dy * r0); g.lineTo(CX + dx * r1, CY + dy * r1); g.stroke();
   }
 
-  // rotating cylinder + keyhole + pick
-  ctx.save();
-  ctx.translate(CX + sx, CY + sy); ctx.rotate(rad(theta));
-  const cyl = ctx.createRadialGradient(-40, -50, 10, 0, 0, R - 20);
-  cyl.addColorStop(0, '#e2c277'); cyl.addColorStop(.6, '#b08d3c'); cyl.addColorStop(1, '#6e5521');
-  ctx.fillStyle = cyl; ctx.strokeStyle = '#3d2e12'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(0, 0, R - 20, 0, 7); ctx.fill(); ctx.stroke();
-  ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1;
-  for (let r = 40; r < R - 20; r += 22) { ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke(); }
+  // rotating cylinder
+  g.save();
+  g.translate(CX + sx, CY + sy); g.rotate(rad(theta));
+  g.strokeStyle = '#fff'; g.lineWidth = 10;
+  g.beginPath(); g.arc(0, 0, R - 10, 0, 7); g.stroke();
+  g.lineWidth = 6;
+  g.beginPath(); g.arc(0, 0, R - 40, 0, 7); g.stroke();
+  for (let a = 0; a < 360; a += 90) {
+    g.beginPath(); g.moveTo(Math.cos(rad(a)) * (R - 40), Math.sin(rad(a)) * (R - 40));
+    g.lineTo(Math.cos(rad(a)) * (R - 10), Math.sin(rad(a)) * (R - 10)); g.stroke();
+  }
   // keyhole
-  ctx.fillStyle = '#0c0805';
-  ctx.beginPath(); ctx.arc(0, -KH + 4, 14, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(-9, -KH + 8); ctx.lineTo(9, -KH + 8); ctx.lineTo(14, 52); ctx.lineTo(-14, 52); ctx.closePath(); ctx.fill();
+  // one merged silhouette: stroke the whole shape wide, then fill it black so only a clean outer outline remains
+  const hole = () => {
+    g.beginPath(); g.arc(0, -KH + 4, 20, 0, 7);
+    g.moveTo(-12, -KH + 12); g.lineTo(-18, 62); g.lineTo(18, 62); g.lineTo(12, -KH + 12); g.closePath();
+  };
+  g.strokeStyle = '#fff'; g.lineWidth = 12; g.lineJoin = 'miter';
+  hole(); g.stroke();
+  g.fillStyle = '#000';
+  g.beginPath(); g.arc(0, -KH + 4, 20, 0, 7); g.fill();       // fill the two shapes separately so overlapping
+  g.beginPath(); g.moveTo(-12, -KH + 12); g.lineTo(-18, 62); g.lineTo(18, 62); g.lineTo(12, -KH + 12); g.closePath(); g.fill();  // windings can't cancel
+  g.restore();
 
-  ctx.restore();
-
-  // lockpick: its base follows the keyhole top as the lock turns, but its angle stays fixed on screen
+  // lockpick: base follows the keyhole top as the lock turns, angle stays fixed on screen
   if (S.picks > 0 || mode === 'broken') {
     const broken = mode === 'broken';
     const dmg = 1 - Math.max(0, hp) / PICK_HP;
-    ctx.save();
-    ctx.translate(CX + sx + KH * Math.sin(rad(theta)), CY + sy - KH * Math.cos(rad(theta)));
-    ctx.rotate(rad(phi - 90));
-    const len = 255;
-    ctx.lineCap = 'round';
-    if (broken) { ctx.translate((Math.random() - .5) * 6, 0); }
-    ctx.strokeStyle = `rgb(${190 + dmg * 50 | 0},${190 - dmg * 110 | 0},${200 - dmg * 140 | 0})`;
-    ctx.lineWidth = 7;
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -(broken ? len * .55 : len)); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(-1.5, -4); ctx.lineTo(-1.5, -(broken ? len * .55 : len) + 4); ctx.stroke();
-    ctx.restore();
+    g.save();
+    g.translate(CX + sx + KH * Math.sin(rad(theta)), CY + sy - KH * Math.cos(rad(theta)));
+    g.rotate(rad(phi - 90));
+    const len = broken ? 255 * .55 : 255;
+    if (broken) g.translate((Math.random() - .5) * 6, 0);
+    const v = Math.round(255 * (1 - dmg * .6));
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect(-12, -len, 24, len);
+    g.restore();
   }
 
-  // pick HP bar
-  const bw = 260, bx = (W - bw) / 2, by = 556;
-  ctx.fillStyle = '#1b140c'; ctx.fillRect(bx, by, bw, 14);
-  const f = Math.max(0, hp) / PICK_HP;
-  ctx.fillStyle = f > .5 ? '#7bc96f' : f > .25 ? '#d6b13f' : '#d9533f';
-  ctx.fillRect(bx, by, bw * f, 14);
-  ctx.strokeStyle = '#8a6c2a'; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, 14);
-  ctx.fillStyle = '#9c8f78'; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('Lockpick condition', W / 2, by - 6);
+  // 1-bit edges
+  const im = g.getImageData(0, 0, GS, GS), d = im.data;
+  for (let i = 3; i < d.length; i += 4) d[i] = d[i] > 127 ? 255 : 0;
+  g.putImageData(im, 0, 0);
+}
 
-  // lock info
-  ctx.fillStyle = '#e8dcc3'; ctx.font = '600 20px system-ui, sans-serif';
-  ctx.fillText('Lock Level ' + lock.level + '  –  ' + difficulty(), W / 2, 34);
-  ctx.font = '14px system-ui, sans-serif'; ctx.fillStyle = '#9c8f78';
-  ctx.fillText('Reward: ' + reward(lock.level) + ' gold', W / 2, 56);
+function draw() {
+  let sx = 0, sy = 0;
+  if (jammed) { sx = (Math.random() - .5) * 8; sy = (Math.random() - .5) * 8; }
+  drawShapes(sx, sy);
 
-  // messages
-  let line = msgT > 0 ? msg : (S.picks <= 0 ? 'Out of lockpicks – visit the shop' : '');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(gfx, 0, 0, cv.width, cv.height);
+  ctx.setTransform(cv.width / W, 0, 0, cv.height / W, 0, 0);
+
+  // text
+  ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.font = '16px ' + FONT;
+  ctx.fillText('> LOCK LEVEL ' + lock.level, 20, 30);
+  ctx.fillStyle = '#8a8a8a'; ctx.font = '14px ' + FONT;
+  ctx.fillText('  ' + difficulty().toUpperCase() + ', REWARD ' + reward(lock.level), 20, 52);
+
+  // pick health: solid bar
+  const bw = 240, bx = 330, by = 556, bh = 20, f = Math.max(0, hp) / PICK_HP;
+  const blink = f < .3 && mode === 'play' && Math.sin(performance.now() / 80) > 0;
+  ctx.fillStyle = '#fff'; ctx.font = '14px ' + FONT; ctx.textAlign = 'right';
+  ctx.fillText('PICK', bx - 12, by + 15);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.strokeRect(bx, by, bw, bh);
+  ctx.fillStyle = blink ? '#8a8a8a' : '#fff';
+  ctx.fillRect(bx + 8, by + 8, Math.round((bw - 16) * f), bh - 16);
+
+  const line = msgT > 0 ? msg : (S.picks <= 0 ? 'Out of lockpicks - visit the shop' : '');
   if (line) {
-    ctx.font = '600 22px system-ui, sans-serif'; ctx.fillStyle = '#d9533f';
-    ctx.fillText(line, W / 2, 96);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.font = '16px ' + FONT;
+    ctx.fillText('! ' + line.toUpperCase(), 20, 80);
   }
+  ctx.textAlign = 'center';
   for (const fl of floaters) {
     ctx.globalAlpha = Math.max(0, 1 - fl.t / 1.4);
-    ctx.fillStyle = '#7bc96f'; ctx.font = '700 30px system-ui, sans-serif';
+    ctx.fillStyle = '#fff'; ctx.font = '24px ' + FONT;
     ctx.fillText(fl.text, CX, CY - 40 - fl.t * 60);
     ctx.globalAlpha = 1;
   }
@@ -252,7 +281,7 @@ const $ = id => document.getElementById(id);
 let prestigeArm = false;
 function refreshUI() {
   $('hGold').textContent = S.gold; $('hPicks').textContent = S.picks;
-  $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige;
+  $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige; $('hCap').textContent = levelCap();
   $('sGold').textContent = S.gold;
   $('sPickInfo').textContent = 'Owned: ' + S.picks + ' – each has ' + PICK_HP + ' HP';
   $('buyPick').textContent = '1 for ' + PICK_COST; $('buyPick').disabled = S.gold < PICK_COST;
@@ -265,7 +294,7 @@ function refreshUI() {
   $('buySec10').textContent = maxed ? '' : '+10 for ' + c10; $('buySec10').style.display = maxed ? 'none' : '';
   $('buySec10').disabled = maxed || S.gold < c10;
   $('sPrestInfo').textContent = 'Prestige ' + S.prestige + ' (+' + Math.round(PRESTIGE_BONUS * 100 * S.prestige) +
-    '% gold). At Security 100: reset Security to ' + START_SEC + ' and gold to 0, gain +' + Math.round(PRESTIGE_BONUS * 100) + '% gold.';
+    '% gold). At Security 100: reset Security to ' + START_SEC + ', gold to 0 and max lock level to ' + LEVEL_CAP_START + ', gain +' + Math.round(PRESTIGE_BONUS * 100) + '% gold.';
   $('prestige').disabled = S.sec < MAX_SEC;
   $('prestige').textContent = prestigeArm ? 'Confirm?' : 'Prestige';
 }
@@ -289,7 +318,7 @@ $('buySec10').onclick = () => buySec(10);
 $('prestige').onclick = () => {
   if (S.sec < MAX_SEC) return;
   if (!prestigeArm) { prestigeArm = true; refreshUI(); return; }
-  S.prestige++; S.sec = START_SEC; S.gold = 0; prestigeArm = false;
+  S.prestige++; S.sec = START_SEC; S.gold = 0; S.opened = 0; prestigeArm = false;
   lock.width = sweetWidth(lock.level); save(); refreshUI(); openShop(false);
   say('Prestige ' + S.prestige + '! Security reset.');
 };
@@ -324,7 +353,7 @@ tb.addEventListener('pointerdown', e => { keys.touch = true; tb.setPointerCaptur
 
 // ---------- loop ----------
 function fit() {
-  const s = Math.min(1200, Math.round(cv.clientWidth * (window.devicePixelRatio || 1)));
+  const s = Math.min(1200, Math.max(300, Math.round(cv.clientWidth * (window.devicePixelRatio || 1) / 300) * 300));  // multiple of the 300px shape buffer
   if (s > 0 && cv.width !== s) { cv.width = cv.height = s; }
 }
 window.addEventListener('resize', fit);
@@ -332,7 +361,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   update(dt); draw();
-  if (!shopOpen) { $('hGold').textContent = S.gold; $('hPicks').textContent = S.picks; $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige; }
+  if (!shopOpen) { $('hGold').textContent = S.gold; $('hPicks').textContent = S.picks; $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige; $('hCap').textContent = levelCap(); }
   requestAnimationFrame(frame);
 }
 newLock(); ensurePick(); fit(); refreshUI();
