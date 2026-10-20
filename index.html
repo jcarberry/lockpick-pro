@@ -11,10 +11,10 @@
     font:14px/1.5 ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace; user-select:none; -webkit-user-select:none; touch-action:none; }
   #app { max-width:720px; margin:0 auto; padding:10px 16px 16px; display:flex; flex-direction:column; min-height:100%; }
   #hud { display:flex; flex-wrap:wrap; gap:2px 20px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);
-    text-transform:uppercase; color:var(--dim); }
+    color:var(--dim); }
   #hud span b { color:var(--fg); font-weight:400; margin-left:6px; }
   #hud .grow { flex:1; }
-  button { font:inherit; text-transform:uppercase; color:var(--fg); background:#000; border:0; padding:0 4px; cursor:pointer; }
+  button { font:inherit; color:var(--fg); background:#000; border:0; padding:0 4px; cursor:pointer; }
   button::before { content:"[ "; color:var(--dim); }
   button::after { content:" ]"; color:var(--dim); }
   button:hover:not(:disabled) { background:var(--fg); color:#000; }
@@ -30,17 +30,18 @@
   #shop { position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; padding:16px; z-index:5; }
   #shop.open { display:flex; }
   #shopbox { border:1px solid var(--fg); padding:16px 18px; width:100%; max-width:480px; }
-  #shopbox h2 { margin:0 0 6px; font-size:14px; font-weight:400; text-transform:uppercase; }
+  #shopbox h2 { margin:0 0 6px; font-size:14px; font-weight:400; }
   #shopbox h2::before { content:"> "; }
   .row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--line); }
   .row small { color:var(--dim); display:block; font-size:12px; }
   .btns { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  #fx { position:fixed; left:0; top:0; width:100vw; height:100vh; max-width:none; aspect-ratio:auto; pointer-events:none; z-index:10; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="hud">
-    <span>Gold <b id="hGold">0</b></span>
+    <span>Coins <b id="hGold">0</b></span>
     <span>Picks <b id="hPicks">5</b></span>
     <span>Security <b id="hSec">20</b></span>
     <span style="display:none">Max lock <b id="hCap">25</b></span>
@@ -55,10 +56,12 @@
   <div id="help">Move the mouse to angle the lockpick &middot; hold <b>A</b> or <b>D</b> to turn the lock (both together = 2x speed) &middot; <b>&larr; &rarr;</b> also move the pick &middot; <b>Esc</b> closes the shop</div>
 </div>
 
+<canvas id="fx"></canvas>
+
 <div id="shop">
   <div id="shopbox">
     <h2>Shop</h2>
-    <div>Gold: <b id="sGold"></b></div>
+    <div>Coins: <b id="sGold"></b></div>
     <div class="row"><div>Lockpick<small id="sPickInfo"></small></div><div class="btns"><button id="buyPick"></button><button id="buyPick5"></button></div></div>
     <div class="row"><div>Security skill<small id="sSecInfo"></small></div><div class="btns"><button id="buySec"></button><button id="buySec10"></button></div></div>
     <div class="row"><div>Prestige<small id="sPrestInfo"></small></div><div class="btns"><button id="prestige"></button></div></div>
@@ -74,7 +77,7 @@ const START_PICKS = 5, START_SEC = 20, MAX_SEC = 100;
 const PICK_COST = 30, PICK_HP = 100, JAM_DMG = 55;       // HP lost per second while jammed
 const TURN_SPEED = 100, RETURN_SPEED = 240;              // degrees per second
 const LEVEL_CAP_START = 25;
-const PRESTIGE_BONUS = 0.25;                              // +25% gold per prestige
+const PRESTIGE_BONUS = 0.25;                              // +25% coins per prestige
 const secCost = s => Math.round(20 * Math.pow(1.045, s - START_SEC));  // cost to go from s to s+1
 const reward = lvl => Math.round((5 + lvl * 1.5) * (1 + PRESTIGE_BONUS * S.prestige));
 
@@ -90,7 +93,6 @@ let theta = 0;       // lock rotation, degrees clockwise
 let hp = PICK_HP;
 let mode = 'play';   // play | opening | broken
 let modeT = 0, jammed = false, shopOpen = false, msg = '', msgT = 0;
-const floaters = [];
 const keys = { a:false, d:false, touch:false, left:false, right:false };
 const turnPower = () => (keys.a ? 1 : 0) + (keys.d ? 1 : 0) + (keys.touch ? 1 : 0);  // A+D together = 2x speed
 
@@ -120,14 +122,12 @@ function ensurePick() {
   if (S.picks <= 0 && S.gold < PICK_COST) { S.picks = 1; say('A stranger lends you a lockpick.'); }
 }
 function breakPick() {
-  S.picks--; mode = 'broken'; modeT = 0.8; jammed = false; say('Lockpick broke!'); save();
+  S.picks--; mode = 'broken'; modeT = 0.8; jammed = false; save();
 }
 
 // ---------- update ----------
 function update(dt) {
   if (msgT > 0) msgT -= dt;
-  for (const f of floaters) { f.t += dt; }
-  while (floaters.length && floaters[0].t > 1.4) floaters.shift();
   if (shopOpen) return;
 
   if (mode === 'broken') {
@@ -155,7 +155,7 @@ function update(dt) {
     if (theta >= 90 && lim >= 90) {           // success
       theta = 90; mode = 'opening'; modeT = 0.8;
       const g = reward(lock.level); S.gold += g; S.opened++;
-      floaters.push({ t:0, text:'+' + g + ' gold' }); save();
+      spawnCoins(g); save();
     } else if (theta >= lim) {
       theta = lim; jammed = true;
       hp -= JAM_DMG * dt;
@@ -175,6 +175,7 @@ const rad = d => d * Math.PI / 180;
 const FONT = 'ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace';
 // Shapes are drawn on a coarse 300x300 buffer, alpha-thresholded (no anti-aliasing) and scaled up
 // without smoothing, so every edge is a hard, chunky stair-step. Text is drawn crisp on top.
+const blinkOn = () => Math.sin(performance.now() / 60) > 0;
 const GS = 300;
 const gfx = document.createElement('canvas'); gfx.width = gfx.height = GS;
 const g = gfx.getContext('2d', { willReadFrequently: true });
@@ -222,11 +223,11 @@ function drawShapes(sx, sy) {
     g.save();
     g.translate(CX + sx + KH * Math.sin(rad(theta)), CY + sy - KH * Math.cos(rad(theta)));
     g.rotate(rad(phi - 90));
-    const len = broken ? 255 * .55 : 255;
+    const len = 255;
     if (broken) g.translate((Math.random() - .5) * 6, 0);
     const v = Math.round(255 * (1 - dmg * .6));
-    g.fillStyle = `rgb(${v},${v},${v})`;
-    g.fillRect(-12, -len, 24, len);
+    g.fillStyle = (jammed || broken) ? '#f00' : `rgb(${v},${v},${v})`;   // red when jammed; blinks red when broken
+    if (!broken || blinkOn()) g.fillRect(-12, -len, 24, len);
     g.restore();
   }
 
@@ -249,30 +250,25 @@ function draw() {
 
   // text
   ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.font = '16px ' + FONT;
-  ctx.fillText('> LOCK LEVEL ' + lock.level, 20, 30);
+  ctx.fillText('> Lock Level ' + lock.level, 20, 30);
   ctx.fillStyle = '#8a8a8a'; ctx.font = '14px ' + FONT;
-  ctx.fillText('  ' + difficulty().toUpperCase() + ', REWARD ' + reward(lock.level), 20, 52);
+  ctx.fillText('  ' + difficulty() + ', Reward ' + reward(lock.level), 20, 52);
 
   // pick health: solid bar
   const bw = 240, bx = 330, by = 556, bh = 20, f = Math.max(0, hp) / PICK_HP;
   const blink = f < .3 && mode === 'play' && Math.sin(performance.now() / 80) > 0;
-  ctx.fillStyle = '#fff'; ctx.font = '14px ' + FONT; ctx.textAlign = 'right';
-  ctx.fillText('PICK', bx - 12, by + 15);
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.strokeRect(bx, by, bw, bh);
+  const snap = mode === 'broken';                       // broken pick: whole bar blinks red
+  const barCol = snap ? (blinkOn() ? '#f00' : '#000') : '#fff';
+  ctx.fillStyle = barCol; ctx.font = '14px ' + FONT; ctx.textAlign = 'right';
+  ctx.fillText('Pick', bx - 12, by + 15);
+  ctx.strokeStyle = barCol; ctx.lineWidth = 4; ctx.strokeRect(bx, by, bw, bh);
   ctx.fillStyle = blink ? '#8a8a8a' : '#fff';
   ctx.fillRect(bx + 8, by + 8, Math.round((bw - 16) * f), bh - 16);
 
   const line = msgT > 0 ? msg : (S.picks <= 0 ? 'Out of lockpicks - visit the shop' : '');
   if (line) {
     ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.font = '16px ' + FONT;
-    ctx.fillText('! ' + line.toUpperCase(), 20, 80);
-  }
-  ctx.textAlign = 'center';
-  for (const fl of floaters) {
-    ctx.globalAlpha = Math.max(0, 1 - fl.t / 1.4);
-    ctx.fillStyle = '#fff'; ctx.font = '24px ' + FONT;
-    ctx.fillText(fl.text, CX, CY - 40 - fl.t * 60);
-    ctx.globalAlpha = 1;
+    ctx.fillText('! ' + line, 20, 80);
   }
 }
 
@@ -280,7 +276,7 @@ function draw() {
 const $ = id => document.getElementById(id);
 let prestigeArm = false;
 function refreshUI() {
-  $('hGold').textContent = S.gold; $('hPicks').textContent = S.picks;
+  $('hGold').textContent = shown; $('hPicks').textContent = S.picks;
   $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige; $('hCap').textContent = levelCap();
   $('sGold').textContent = S.gold;
   $('sPickInfo').textContent = 'Owned: ' + S.picks + ' – each has ' + PICK_HP + ' HP';
@@ -294,7 +290,7 @@ function refreshUI() {
   $('buySec10').textContent = maxed ? '' : '+10 for ' + c10; $('buySec10').style.display = maxed ? 'none' : '';
   $('buySec10').disabled = maxed || S.gold < c10;
   $('sPrestInfo').textContent = 'Prestige ' + S.prestige + ' (+' + Math.round(PRESTIGE_BONUS * 100 * S.prestige) +
-    '% gold). At Security 100: reset Security to ' + START_SEC + ', gold to 0 and max lock level to ' + LEVEL_CAP_START + ', gain +' + Math.round(PRESTIGE_BONUS * 100) + '% gold.';
+    '% coins). At Security 100: reset Security to ' + START_SEC + ', coins to 0 and max lock level to ' + LEVEL_CAP_START + ', gain +' + Math.round(PRESTIGE_BONUS * 100) + '% coins.';
   $('prestige').disabled = S.sec < MAX_SEC;
   $('prestige').textContent = prestigeArm ? 'Confirm?' : 'Prestige';
 }
@@ -351,6 +347,82 @@ const tb = $('turn');
 tb.addEventListener('pointerdown', e => { keys.touch = true; tb.setPointerCapture(e.pointerId); e.stopPropagation(); });
 ['pointerup', 'pointercancel'].forEach(n => tb.addEventListener(n, () => { keys.touch = false; }));
 
+// ---------- coins ----------
+// On unlock, coins burst from the keyhole with a random velocity offset, then home in on the HUD counter.
+// The counter only ticks up (and flashes green) as each coin lands.
+const fx = document.getElementById('fx'), fctx = fx.getContext('2d');
+const coins = [];
+const COIN_FPS = 12;                          // spin keyframes per second (movement itself is smooth)
+const SPIN = [1, .7, .4, .28, .4, .7];       // coin width per spin keyframe
+let shown = S.gold, flashT = 0;
+function fitFx() {
+  const d = window.devicePixelRatio || 1;
+  fx.width = Math.round(innerWidth * d); fx.height = Math.round(innerHeight * d);
+}
+window.addEventListener('resize', fitFx);
+function coinTarget() {
+  const b = $('hGold').getBoundingClientRect();
+  return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+}
+function spawnCoins(total) {
+  const r = cv.getBoundingClientRect(), t = coinTarget();
+  const ox = r.left + (CX + KH - 4) / W * r.width, oy = r.top + CY / W * r.height;   // keyhole centre after the 90 degree turn
+  const n = Math.max(6, Math.min(26, Math.round(total / 6)));
+  const toward = Math.atan2(t.y - oy, t.x - ox);
+  let left = total;
+  for (let i = 0; i < n; i++) {
+    const value = i === n - 1 ? left : Math.floor(total / n);
+    left -= value;
+    const a = Math.random() * Math.PI * 2, m = 150 + Math.random() * 450;           // random velocity offset
+    coins.push({
+      x: ox + (Math.random() - .5) * 8, y: oy + (Math.random() - .5) * 8,
+      vx: Math.cos(toward) * 200 + Math.cos(a) * m, vy: Math.sin(toward) * 200 + Math.sin(a) * m,
+      delay: i * 0.035, age: 0, value, phase: Math.floor(Math.random() * 6)
+    });
+  }
+}
+function updateCoins(dt) {
+  if (!coins.length) { if (flashT > 0) flashT -= dt; return; }
+  const t = coinTarget();
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const c = coins[i];
+    if (c.delay > 0) { c.delay -= dt; continue; }
+    c.age += dt;
+    const dx = t.x - c.x, dy = t.y - c.y, d = Math.hypot(dx, dy) || 1;
+    const acc = 1500 + 120000 * Math.max(0, c.age - 0.2);   // weak pull for the burst, then a very strong pull so the second half flies straight
+    c.vx += dx / d * acc * dt; c.vy += dy / d * acc * dt;
+    const damp = 1 / (1 + 2.2 * dt); c.vx *= damp; c.vy *= damp;
+    const sp = Math.hypot(c.vx, c.vy);
+    if (sp > 1800) { c.vx *= 1800 / sp; c.vy *= 1800 / sp; }
+    c.x += c.vx * dt; c.y += c.vy * dt;
+    if (d < 22 + sp * dt * .5 || c.age > 2.5) {
+      shown = Math.min(S.gold, shown + c.value); flashT = 0.3;
+      coins.splice(i, 1);
+    }
+  }
+  if (flashT > 0) flashT -= dt;
+}
+function drawCoins() {
+  // Flat gold, drawn pixel by pixel on the same grid size as the lock graphics (no anti-aliasing).
+  const d = window.devicePixelRatio || 1, snap = v => Math.round(v * d) / d;
+  fctx.setTransform(d, 0, 0, d, 0, 0);
+  fctx.clearRect(0, 0, innerWidth, innerHeight);
+  if (!coins.length) return;
+  const P = Math.max(1, cv.getBoundingClientRect().width / GS);      // css px per lock-graphics pixel
+  const rad0 = Math.max(10, Math.round(cv.getBoundingClientRect().width * 0.038 / P));   // coin radius in grid pixels
+  fctx.fillStyle = '#ffc800';
+  for (const c of coins) {
+    if (c.delay > 0) continue;
+    const gx = Math.round(c.x / P), gy = Math.round(c.y / P);
+    const w = Math.max(3, Math.round(rad0 * SPIN[(Math.floor(c.age * COIN_FPS) + c.phase) % SPIN.length]));
+    for (let dy = -rad0; dy <= rad0; dy++) {
+      const half = Math.round(w * Math.sqrt(1 - (dy / (rad0 + .5)) ** 2));
+      const x0 = snap((gx - half) * P), x1 = snap((gx + half + 1) * P), y0 = snap((gy + dy) * P), y1 = snap((gy + dy + 1) * P);
+      fctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    }
+  }
+}
+
 // ---------- loop ----------
 function fit() {
   const s = Math.min(1200, Math.max(300, Math.round(cv.clientWidth * (window.devicePixelRatio || 1) / 300) * 300));  // multiple of the 300px shape buffer
@@ -360,11 +432,14 @@ window.addEventListener('resize', fit);
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  update(dt); draw();
-  if (!shopOpen) { $('hGold').textContent = S.gold; $('hPicks').textContent = S.picks; $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige; $('hCap').textContent = levelCap(); }
+  update(dt); updateCoins(dt); draw(); drawCoins();
+  if (!coins.length) shown = S.gold;
+  shown = Math.min(shown, S.gold);
+  $('hGold').style.color = flashT > 0 ? '#3f3' : '';
+  if (!shopOpen) { $('hGold').textContent = shown; $('hPicks').textContent = S.picks; $('hSec').textContent = S.sec; $('hPrest').textContent = S.prestige; $('hCap').textContent = levelCap(); }
   requestAnimationFrame(frame);
 }
-newLock(); ensurePick(); fit(); refreshUI();
+newLock(); ensurePick(); fit(); fitFx(); refreshUI();
 requestAnimationFrame(frame);
 })();
 </script>

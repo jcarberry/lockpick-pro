@@ -9,7 +9,7 @@ Single-file browser lockpicking minigame. [Play](https://jcarberry.github.io/loc
 - Pick outside it: lock jams and the pick takes damage
 - Higher Security: bigger sweet spots
 - Shop: buy lockpicks and Security
-- Security 100: prestige for +25% gold
+- Security 100: prestige for +25% coins
 - Progress saves in the browser
 
 Run locally: open `index.html`.
