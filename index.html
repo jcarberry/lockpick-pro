@@ -53,7 +53,7 @@
     <canvas id="cv" width="1200" height="1200"></canvas>
     <button id="turn">Turn</button>
   </div>
-  <div id="help">Move the mouse to angle the lockpick &middot; hold <b>A</b> or <b>D</b> to turn the lock (both together = 2x speed) &middot; <b>&larr; &rarr;</b> also move the pick &middot; <b>Esc</b> closes the shop</div>
+  <div id="help">Move the mouse to angle the lockpick &middot; hold <b>A</b>, <b>D</b> or <b>left click</b> to turn the lock (both together = 2x speed) &middot; <b>&larr; &rarr;</b> also move the pick &middot; <b>Esc</b> closes the shop</div>
 </div>
 
 <canvas id="fx"></canvas>
@@ -93,8 +93,8 @@ let theta = 0;       // lock rotation, degrees clockwise
 let hp = PICK_HP;
 let mode = 'play';   // play | opening | broken
 let modeT = 0, jammed = false, shopOpen = false, msg = '', msgT = 0;
-const keys = { a:false, d:false, touch:false, left:false, right:false };
-const turnPower = () => (keys.a ? 1 : 0) + (keys.d ? 1 : 0) + (keys.touch ? 1 : 0);  // A+D together = 2x speed
+const keys = { a:false, d:false, touch:false, mouse:false, left:false, right:false };
+const turnPower = () => (keys.a ? 1 : 0) + (keys.d ? 1 : 0) + (keys.touch ? 1 : 0) + (keys.mouse ? 1 : 0);  // A+D together = 2x speed
 
 function sweetWidth(level) {                  // full width of sweet spot in degrees
   const diff = level - S.sec;
@@ -302,7 +302,7 @@ function buySec(n) {
 function openShop(o) {
   shopOpen = o; prestigeArm = false;
   $('shop').classList.toggle('open', o);
-  keys.a = keys.d = keys.touch = false; refreshUI();
+  keys.a = keys.d = keys.touch = keys.mouse = false; refreshUI();
   if (!o && S.picks <= 0) ensurePick();
 }
 $('shopBtn').onclick = () => openShop(true);
@@ -342,7 +342,12 @@ window.addEventListener('keyup', e => {
   else if (k === 'arrowleft') keys.left = false;
   else if (k === 'arrowright') keys.right = false;
 });
-window.addEventListener('blur', () => { keys.a = keys.d = keys.touch = keys.left = keys.right = false; });
+window.addEventListener('blur', () => { keys.a = keys.d = keys.touch = keys.mouse = keys.left = keys.right = false; });
+window.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button === 0 && !shopOpen && !e.target.closest('button')) keys.mouse = true;
+});
+window.addEventListener('pointerup', e => { if (e.button === 0) keys.mouse = false; });
+window.addEventListener('pointercancel', () => { keys.mouse = false; });
 const tb = $('turn');
 tb.addEventListener('pointerdown', e => { keys.touch = true; tb.setPointerCapture(e.pointerId); e.stopPropagation(); });
 ['pointerup', 'pointercancel'].forEach(n => tb.addEventListener(n, () => { keys.touch = false; }));
